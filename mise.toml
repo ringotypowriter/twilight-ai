@@ -1,0 +1,42 @@
+[tools]
+golangci-lint = "2.11.3"
+
+[tasks.build]
+description = "Build all packages"
+run = "go build ./..."
+
+[tasks.test]
+description = "Run all tests (short mode, skips integration)"
+run = "go test -short -count=1 ./..."
+
+[tasks.test-unit]
+description = "Run unit tests only"
+run = "go test -count=1 -v -run '^Test[^I]' ./..."
+
+[tasks.test-integration]
+description = "Run integration tests (requires API keys in env)"
+run = "go test -count=1 -v -run '^TestIntegration_|^TestClient_' -timeout 120s ./..."
+
+[tasks.test-race]
+description = "Run tests with race detector"
+run = "go test -short -race -count=1 ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.lint-fix]
+description = "Run golangci-lint with auto-fix"
+run = "golangci-lint run --fix ./..."
+
+[tasks.fmt]
+description = "Format code"
+run = "gofmt -s -w ."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.ci]
+description = "Run the full CI pipeline locally"
+depends = ["build", "vet", "lint", "test"]
