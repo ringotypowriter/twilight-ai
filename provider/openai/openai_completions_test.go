@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/memohai/twilight-ai/internal/testutil"
 	"github.com/memohai/twilight-ai/provider/openai"
 	"github.com/memohai/twilight-ai/sdk"
@@ -292,12 +293,12 @@ func TestDoGenerate_ToolCall(t *testing.T) {
 		Tools: []sdk.Tool{{
 			Name:        "get_weather",
 			Description: "Get the weather for a location",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"location": map[string]any{"type": "string"},
+			Parameters: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"location": {Type: "string"},
 				},
-				"required": []string{"location"},
+				Required: []string{"location"},
 			},
 		}},
 		ToolChoice: "auto",
@@ -452,7 +453,7 @@ func TestDoStream_ToolCall(t *testing.T) {
 			Role:    sdk.MessageRoleUser,
 			Content: []sdk.MessagePart{sdk.TextPart{Text: "Weather in Tokyo?"}},
 		}},
-		Tools: []sdk.Tool{{Name: "get_weather", Parameters: map[string]any{"type": "object"}}},
+		Tools: []sdk.Tool{{Name: "get_weather", Parameters: &jsonschema.Schema{Type: "object"}}},
 	})
 	if err != nil {
 		t.Fatalf("DoStream: %v", err)

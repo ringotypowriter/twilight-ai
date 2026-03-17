@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/memohai/twilight-ai/internal/testutil"
 	"github.com/memohai/twilight-ai/provider/openai"
 	"github.com/memohai/twilight-ai/sdk"
@@ -245,7 +246,7 @@ func TestClient_GenerateTextResult_ToolAutoExec(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("Add 2 and 3")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "add",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				m := input.(map[string]any)
 				return m["a"].(float64) + m["b"].(float64), nil
@@ -285,7 +286,7 @@ func TestClient_GenerateTextResult_NoAutoExec_WhenMaxStepsZero(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("Add 1 and 2")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "add",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return nil, fmt.Errorf("should not be called")
 			},
@@ -329,7 +330,7 @@ func TestClient_GenerateTextResult_UnlimitedSteps(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("go")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "step",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "ok", nil
 			},
@@ -379,7 +380,7 @@ func TestClient_GenerateTextResult_Callbacks(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("ping")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "ping",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "pong", nil
 			},
@@ -438,7 +439,7 @@ func TestClient_GenerateTextResult_PrepareStep(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("go")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "fetch",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "data", nil
 			},
@@ -478,7 +479,7 @@ func TestClient_GenerateTextResult_ApprovalApproved(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("do it")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:            "dangerous",
-			Parameters:      map[string]any{"type": "object"},
+			Parameters:      &jsonschema.Schema{Type: "object"},
 			RequireApproval: true,
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				executed = true
@@ -523,7 +524,7 @@ func TestClient_GenerateTextResult_ApprovalDenied(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("do it")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:            "dangerous",
-			Parameters:      map[string]any{"type": "object"},
+			Parameters:      &jsonschema.Schema{Type: "object"},
 			RequireApproval: true,
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				executed = true
@@ -568,7 +569,7 @@ func TestClient_GenerateTextResult_ApprovalNoHandler(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("do it")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:            "dangerous",
-			Parameters:      map[string]any{"type": "object"},
+			Parameters:      &jsonschema.Schema{Type: "object"},
 			RequireApproval: true,
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				executed = true
@@ -613,7 +614,7 @@ func TestClient_StreamText_ToolAutoExec(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("greet Alice")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "greet",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				m := input.(map[string]any)
 				return fmt.Sprintf("greeting for %s", m["name"]), nil
@@ -679,7 +680,7 @@ func TestClient_StreamText_ToolProgress(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("run")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "run_cmd",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				ctx.SendProgress("line 1\n")
 				ctx.SendProgress("line 2\n")
@@ -731,7 +732,7 @@ func TestClient_StreamText_ApprovalFlow(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("delete")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:            "rm_rf",
-			Parameters:      map[string]any{"type": "object"},
+			Parameters:      &jsonschema.Schema{Type: "object"},
 			RequireApproval: true,
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "deleted", nil
@@ -790,7 +791,7 @@ func TestClient_StreamText_OnStepCallback(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("go")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "noop",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "ok", nil
 			},
@@ -845,7 +846,7 @@ func TestClient_GenerateTextResult_StepsAndMessages(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("1+2?")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "add",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return float64(3), nil
 			},
@@ -915,7 +916,7 @@ func TestClient_StreamText_StepsAndMessages(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("ping")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "ping",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "pong", nil
 			},
@@ -975,7 +976,7 @@ func TestClient_GenerateTextResult_OnStepOverride(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("go")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "x",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "ok", nil
 			},
@@ -1020,7 +1021,7 @@ func TestClient_GenerateTextResult_PrepareStepOverride(t *testing.T) {
 		sdk.WithMessages([]sdk.Message{sdk.UserMessage("go")}),
 		sdk.WithTools([]sdk.Tool{{
 			Name:       "x",
-			Parameters: map[string]any{"type": "object"},
+			Parameters: &jsonschema.Schema{Type: "object"},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return "ok", nil
 			},

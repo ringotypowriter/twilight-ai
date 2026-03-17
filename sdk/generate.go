@@ -1,5 +1,7 @@
 package sdk
 
+import "github.com/google/jsonschema-go/jsonschema"
+
 type FinishReason string
 
 const (
@@ -22,7 +24,7 @@ const (
 
 type ResponseFormat struct {
 	Type       ResponseFormatType `json:"type"`
-	JSONSchema any                `json:"jsonSchema,omitempty"`
+	JSONSchema *jsonschema.Schema `json:"jsonSchema,omitempty"`
 }
 
 type GenerateParams struct {

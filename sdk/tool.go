@@ -19,7 +19,7 @@ type ToolExecContext struct {
 type Tool struct {
 	Name            string          `json:"name"`
 	Description     string          `json:"description,omitempty"`
-	Parameters      any             `json:"parameters"` // JSON Schema object
+	Parameters      any             `json:"parameters"` // *jsonschema.Schema, or a Go struct for automatic inference
 	Execute         ToolExecuteFunc `json:"-"`
 	RequireApproval bool            `json:"-"`
 }

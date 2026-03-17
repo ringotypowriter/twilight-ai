@@ -13,6 +13,13 @@ func buildConfig(options []GenerateOption) (*generateConfig, Provider, error) {
 	if cfg.Params.Model.Provider == nil {
 		return nil, nil, fmt.Errorf("twilightai: model %q has no provider", cfg.Params.Model.ID)
 	}
+	for i := range cfg.Params.Tools {
+		schema, err := resolveSchema(cfg.Params.Tools[i].Parameters)
+		if err != nil {
+			return nil, nil, fmt.Errorf("twilightai: tool %q: %w", cfg.Params.Tools[i].Name, err)
+		}
+		cfg.Params.Tools[i].Parameters = schema
+	}
 	return cfg, cfg.Params.Model.Provider, nil
 }
 

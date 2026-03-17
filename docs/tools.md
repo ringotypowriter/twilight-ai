@@ -1,34 +1,69 @@
 # Tool Calling
 
-Twilight AI supports LLM tool calling (also known as function calling) with automatic multi-step execution. You define tools as Go structs with execution handlers, and the SDK manages the call-execute-respond loop.
+Twilight AI supports LLM tool calling (also known as function calling) with automatic multi-step execution. You define tools with execution handlers, and the SDK manages the call-execute-respond loop.
 
 ## Defining a Tool
 
-A `Tool` has a name, description, JSON Schema parameters, and an `Execute` function:
+There are three ways to define a tool's parameter schema.
+
+### Using `NewTool[T]` (recommended)
+
+The generic `NewTool` function infers the JSON Schema from a Go struct and provides type-safe input in the `Execute` handler:
+
+```go
+type WeatherParams struct {
+    City string `json:"city" jsonschema:"City name, e.g. 'Tokyo'"`
+}
+
+weatherTool := sdk.NewTool("get_weather", "Get the current weather for a given city",
+    func(ctx *sdk.ToolExecContext, input WeatherParams) (any, error) {
+        return map[string]any{
+            "city":    input.City,
+            "temp":    "22°C",
+            "weather": "sunny",
+        }, nil
+    },
+)
+```
+
+### Passing a Go struct
+
+You can pass a struct value directly to `Parameters`. The SDK infers the JSON Schema via reflection before sending to the provider:
 
 ```go
 weatherTool := sdk.Tool{
     Name:        "get_weather",
     Description: "Get the current weather for a given city",
-    Parameters: map[string]any{
-        "type": "object",
-        "properties": map[string]any{
-            "city": map[string]any{
-                "type":        "string",
-                "description": "City name, e.g. 'Tokyo'",
-            },
+    Parameters:  WeatherParams{},
+    Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+        args := input.(map[string]any)
+        city := args["city"].(string)
+        return map[string]any{"city": city, "temp": "22°C"}, nil
+    },
+}
+```
+
+### Using `*jsonschema.Schema` directly
+
+For full control over the schema, construct a `*jsonschema.Schema` value:
+
+```go
+import "github.com/google/jsonschema-go/jsonschema"
+
+weatherTool := sdk.Tool{
+    Name:        "get_weather",
+    Description: "Get the current weather for a given city",
+    Parameters: &jsonschema.Schema{
+        Type: "object",
+        Properties: map[string]*jsonschema.Schema{
+            "city": {Type: "string", Description: "City name, e.g. 'Tokyo'"},
         },
-        "required": []string{"city"},
+        Required: []string{"city"},
     },
     Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
         args := input.(map[string]any)
         city := args["city"].(string)
-        // Call your weather API here...
-        return map[string]any{
-            "city":    city,
-            "temp":    "22°C",
-            "weather": "sunny",
-        }, nil
+        return map[string]any{"city": city, "temp": "22°C"}, nil
     },
 }
 ```
@@ -39,7 +74,7 @@ weatherTool := sdk.Tool{
 |-------|------|-------------|
 | `Name` | `string` | Unique tool name passed to the LLM |
 | `Description` | `string` | Human-readable description for the LLM |
-| `Parameters` | `any` | JSON Schema describing expected input |
+| `Parameters` | `any` | Go struct (auto-inferred) or `*jsonschema.Schema` |
 | `Execute` | `ToolExecuteFunc` | Go function that runs when the LLM calls this tool |
 | `RequireApproval` | `bool` | If true, requires approval before execution |
 

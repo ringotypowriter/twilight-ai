@@ -9,12 +9,12 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 
 - **Simple API** — `GenerateText` and `StreamText`, two functions cover most use cases
 - **Provider-agnostic** — swap between OpenAI, Azure, or any OpenAI-compatible endpoint
-- **Tool calling** — define tools with Go functions, SDK handles multi-step execution automatically
+- **Tool calling** — define tools with Go structs, SDK infers JSON Schema and handles multi-step execution
 - **Streaming** — first-class channel-based streaming with fine-grained `StreamPart` types
 - **Multi-step execution** — automatic tool-call loop with configurable `MaxSteps`
 - **Rich message types** — text, images, files, reasoning content, tool calls/results
 - **Approval flow** — optional human-in-the-loop approval for sensitive tool calls
-- **Zero dependencies** — only the Go standard library
+- **Minimal dependencies** — only [google/jsonschema-go](https://github.com/google/jsonschema-go) beyond the standard library
 
 ## Installation
 
@@ -84,27 +84,25 @@ for part := range sr.Stream {
 
 ### Tool Calling
 
+Define a struct for your tool's parameters — the SDK infers the JSON Schema automatically:
+
 ```go
+type WeatherParams struct {
+    City string `json:"city" jsonschema:"City name"`
+}
+
+weatherTool := sdk.NewTool("get_weather", "Get current weather for a city",
+    func(ctx *sdk.ToolExecContext, input WeatherParams) (any, error) {
+        return map[string]any{"city": input.City, "temp": "22°C"}, nil
+    },
+)
+
 result, err := sdk.GenerateTextResult(ctx,
     sdk.WithModel(model),
     sdk.WithMessages([]sdk.Message{
         sdk.UserMessage("What's the weather in Tokyo?"),
     }),
-    sdk.WithTools([]sdk.Tool{{
-        Name:        "get_weather",
-        Description: "Get current weather for a city",
-        Parameters: map[string]any{
-            "type": "object",
-            "properties": map[string]any{
-                "city": map[string]any{"type": "string"},
-            },
-            "required": []string{"city"},
-        },
-        Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-            city := input.(map[string]any)["city"].(string)
-            return map[string]any{"city": city, "temp": "22°C"}, nil
-        },
-    }}),
+    sdk.WithTools([]sdk.Tool{weatherTool}),
     sdk.WithMaxSteps(5),
 )
 ```
