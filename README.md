@@ -8,7 +8,7 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 ## Features
 
 - **Simple API** — `GenerateText` and `StreamText`, two functions cover most use cases
-- **Provider-agnostic** — swap between OpenAI, Azure, or any OpenAI-compatible endpoint
+- **Provider-agnostic** — swap between OpenAI, Anthropic, Google, or any OpenAI-compatible endpoint
 - **Tool calling** — define tools with Go structs, SDK infers JSON Schema and handles multi-step execution
 - **Streaming** — first-class channel-based streaming with fine-grained `StreamPart` types
 - **Multi-step execution** — automatic tool-call loop with configurable `MaxSteps`
@@ -26,7 +26,7 @@ Requires **Go 1.25+**.
 
 ## Quick Start
 
-### Generate Text
+### Generate Text (Chat Completions API)
 
 ```go
 package main
@@ -36,13 +36,13 @@ import (
     "fmt"
     "log"
 
-    "github.com/memohai/twilight-ai/provider/openai"
+    "github.com/memohai/twilight-ai/provider/openai/completions"
     "github.com/memohai/twilight-ai/sdk"
 )
 
 func main() {
-    provider := openai.NewCompletions(
-        openai.WithAPIKey("sk-..."),
+    provider := completions.New(
+        completions.WithAPIKey("sk-..."),
     )
     model := provider.ChatModel("gpt-4o-mini")
 
@@ -57,6 +57,76 @@ func main() {
     }
     fmt.Println(text)
 }
+```
+
+### Generate Text (Responses API)
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/responses"
+
+provider := responses.New(
+    responses.WithAPIKey("sk-..."),
+)
+model := provider.ChatModel("gpt-4o-mini")
+
+text, err := sdk.GenerateText(context.Background(),
+    sdk.WithModel(model),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("Explain Go channels in 3 sentences."),
+    }),
+)
+```
+
+The Responses API is OpenAI's newer API with first-class support for reasoning models (o3, o4-mini), URL citation annotations, and a flat input format. See [Providers](docs/providers.md) for details.
+
+### Anthropic
+
+```go
+import "github.com/memohai/twilight-ai/provider/anthropic/messages"
+
+provider := messages.New(
+    messages.WithAPIKey("sk-ant-..."),
+)
+model := provider.ChatModel("claude-sonnet-4-20250514")
+
+maxTokens := 1024
+text, err := sdk.GenerateText(context.Background(),
+    sdk.WithModel(model),
+    sdk.WithMaxTokens(maxTokens),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("Explain Go channels in 3 sentences."),
+    }),
+)
+```
+
+For extended thinking (reasoning), configure the provider with `WithThinking`:
+
+```go
+provider := messages.New(
+    messages.WithAPIKey("sk-ant-..."),
+    messages.WithThinking(messages.ThinkingConfig{
+        Type:         "enabled",
+        BudgetTokens: 4000,
+    }),
+)
+```
+
+### Google Gemini
+
+```go
+import "github.com/memohai/twilight-ai/provider/google/generativeai"
+
+provider := generativeai.New(
+    generativeai.WithAPIKey("AIza..."),
+)
+model := provider.ChatModel("gemini-2.5-flash")
+
+text, err := sdk.GenerateText(context.Background(),
+    sdk.WithModel(model),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("Explain Go channels in 3 sentences."),
+    }),
+)
 ```
 
 ### Stream Text
@@ -123,10 +193,11 @@ result, err := sdk.GenerateTextResult(ctx,
 │  │  DoGenerate() / DoStream()              │ │
 │  └─────────────┬───────────────────────────┘ │
 ├────────────────┼─────────────────────────────┤
-│  ┌─────────────▼──┐  ┌──────────────────┐   │
-│  │  OpenAI        │  │  Your Provider   │   │
-│  │  Completions   │  │  (coming soon)   │   │
-│  └────────────────┘  └──────────────────┘   │
+│  ┌─────────────▼──┐ ┌───────────┐ ┌─────────┐│
+│  │  OpenAI        │ │ Anthropic │ │  Google ││
+│  │  Completions / │ │ Messages  │ │ Gemini  ││
+│  │  Responses     │ │           │ │         ││
+│  └────────────────┘ └───────────┘ └─────────┘│
 └──────────────────────────────────────────────┘
 ```
 
@@ -135,19 +206,21 @@ result, err := sdk.GenerateTextResult(ctx,
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation, setup, and first request |
-| [Providers](docs/providers.md) | Provider interface and OpenAI implementation |
+| [Providers](docs/providers.md) | Provider interface, OpenAI, Anthropic, and Google Gemini |
 | [Tool Calling](docs/tools.md) | Defining tools, multi-step execution, approval flow |
 | [Streaming](docs/streaming.md) | Channel-based streaming and StreamPart types |
 | [API Reference](docs/api-reference.md) | Complete type and function reference |
 
 ## Supported Providers
 
-| Provider | Package | Status |
-|----------|---------|--------|
-| OpenAI | `provider/openai` | ✅ Stable |
-| OpenAI-compatible (DeepSeek, Groq, etc.) | `provider/openai` + `WithBaseURL` | ✅ Stable |
-| Anthropic | — | Planned |
-| Google Gemini | — | Planned |
+| Provider | Constructor | API | Status |
+|----------|-------------|-----|--------|
+| OpenAI Chat Completions | `completions.New()` | `/chat/completions` | ✅ Stable |
+| OpenAI Responses | `responses.New()` | `/responses` | ✅ Stable |
+| OpenAI-compatible (DeepSeek, Groq, etc.) | `completions.New()` + `WithBaseURL` | `/chat/completions` | ✅ Stable |
+| OpenRouter Responses | `responses.New()` + `WithBaseURL` | `/responses` | ✅ Stable |
+| Anthropic | `messages.New()` | `/messages` | ✅ Stable |
+| Google Gemini | `generativeai.New()` | Generative AI API | ✅ Stable |
 
 ## License
 

@@ -32,17 +32,17 @@ type Model struct {
 }
 ```
 
-## OpenAI Provider
+## OpenAI Completions Provider
 
-The built-in `provider/openai` package implements the OpenAI Chat Completions API.
+The `provider/openai/completions` package provides an implementation for the OpenAI Chat Completions API (`/chat/completions`).
 
 ### Basic Usage
 
 ```go
-import "github.com/memohai/twilight-ai/provider/openai"
+import "github.com/memohai/twilight-ai/provider/openai/completions"
 
-provider := openai.NewCompletions(
-    openai.WithAPIKey("sk-..."),
+provider := completions.New(
+    completions.WithAPIKey("sk-..."),
 )
 model := provider.ChatModel("gpt-4o-mini")
 ```
@@ -61,26 +61,26 @@ Any service that implements the OpenAI Chat Completions API works out of the box
 
 ```go
 // DeepSeek
-provider := openai.NewCompletions(
-    openai.WithAPIKey("your-deepseek-key"),
-    openai.WithBaseURL("https://api.deepseek.com"),
+provider := completions.New(
+    completions.WithAPIKey("your-deepseek-key"),
+    completions.WithBaseURL("https://api.deepseek.com"),
 )
 
 // Groq
-provider := openai.NewCompletions(
-    openai.WithAPIKey("your-groq-key"),
-    openai.WithBaseURL("https://api.groq.com/openai/v1"),
+provider := completions.New(
+    completions.WithAPIKey("your-groq-key"),
+    completions.WithBaseURL("https://api.groq.com/openai/v1"),
 )
 
 // Azure OpenAI
-provider := openai.NewCompletions(
-    openai.WithAPIKey("your-azure-key"),
-    openai.WithBaseURL("https://your-resource.openai.azure.com/openai/deployments/gpt-4o"),
+provider := completions.New(
+    completions.WithAPIKey("your-azure-key"),
+    completions.WithBaseURL("https://your-resource.openai.azure.com/openai/deployments/gpt-4o"),
 )
 
 // Local (Ollama, vLLM, etc.)
-provider := openai.NewCompletions(
-    openai.WithBaseURL("http://localhost:11434/v1"),
+provider := completions.New(
+    completions.WithBaseURL("http://localhost:11434/v1"),
 )
 ```
 
@@ -102,9 +102,9 @@ provider := openai.NewCompletions(
 Use `WithHTTPClient` for custom timeouts, proxies, or TLS settings:
 
 ```go
-provider := openai.NewCompletions(
-    openai.WithAPIKey("sk-..."),
-    openai.WithHTTPClient(&http.Client{
+provider := completions.New(
+    completions.WithAPIKey("sk-..."),
+    completions.WithHTTPClient(&http.Client{
         Timeout: 120 * time.Second,
         Transport: &http.Transport{
             Proxy: http.ProxyFromEnvironment,
@@ -112,6 +112,235 @@ provider := openai.NewCompletions(
     }),
 )
 ```
+
+## OpenAI Responses Provider
+
+The `provider/openai/responses` package provides an implementation for the OpenAI Responses API (`/responses`). This is OpenAI's newer API that offers first-class reasoning support, URL citation annotations, and a flat input format.
+
+### When to Use Responses vs Completions
+
+| | Chat Completions | Responses |
+|--|---|---|
+| **Endpoint** | `/chat/completions` | `/responses` |
+| **Reasoning models** | Basic support (`reasoning_content` field) | First-class (`reasoning` output items with summaries) |
+| **Citations** | Not supported | URL citations via annotations |
+| **Input format** | Nested `messages` array | Flat `input` array |
+| **Compatibility** | Broad (DeepSeek, Groq, Ollama, etc.) | OpenAI and OpenRouter |
+
+Use **Completions** when you need broad compatibility with OpenAI-compatible endpoints. Use **Responses** when you want native reasoning model support (o3, o4-mini) or URL citation annotations.
+
+### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/responses"
+
+provider := responses.New(
+    responses.WithAPIKey("sk-..."),
+)
+model := provider.ChatModel("gpt-4o-mini")
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+### Using with OpenRouter
+
+OpenRouter supports the Responses API as a beta feature:
+
+```go
+provider := responses.New(
+    responses.WithAPIKey("sk-or-v1-..."),
+    responses.WithBaseURL("https://openrouter.ai/api/v1"),
+)
+model := provider.ChatModel("openai/o4-mini")
+```
+
+### Reasoning Models
+
+Reasoning models (o3, o4-mini) return both reasoning summaries and the final answer:
+
+```go
+effort := "medium"
+result, _ := sdk.GenerateTextResult(ctx,
+    sdk.WithModel(provider.ChatModel("openai/o4-mini")),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("What is 15 * 37? Think step by step."),
+    }),
+    sdk.WithReasoningEffort(&effort),
+)
+fmt.Println(result.Reasoning)  // model's reasoning summary
+fmt.Println(result.Text)       // final answer: "555"
+```
+
+In streaming mode, reasoning arrives as `ReasoningStartPart` / `ReasoningDeltaPart` / `ReasoningEndPart` before the text content.
+
+### Supported Features
+
+| Feature | Supported |
+|---------|-----------|
+| Text generation | ✅ |
+| Streaming (SSE) | ✅ |
+| Tool/function calling | ✅ |
+| Vision (image inputs) | ✅ |
+| Reasoning summaries (o3, o4-mini) | ✅ |
+| URL citation annotations | ✅ |
+| JSON mode / JSON Schema | ✅ |
+| Token usage reporting | ✅ |
+| Cached / reasoning token details | ✅ |
+
+## Anthropic Provider
+
+The `provider/anthropic/messages` package implements the [Anthropic Messages API](https://docs.anthropic.com/en/api/messages) for Claude models.
+
+### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/anthropic/messages"
+
+provider := messages.New(
+    messages.WithAPIKey("sk-ant-..."),
+)
+model := provider.ChatModel("claude-sonnet-4-20250514")
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `x-api-key` header |
+| `WithAuthToken(token)` | `""` | OAuth token sent as `Authorization: Bearer <token>` |
+| `WithBaseURL(url)` | `https://api.anthropic.com` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+| `WithThinking(config)` | `nil` | Enable extended thinking for reasoning |
+
+### Extended Thinking
+
+Claude supports [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking) (chain-of-thought reasoning):
+
+```go
+provider := messages.New(
+    messages.WithAPIKey("sk-ant-..."),
+    messages.WithThinking(messages.ThinkingConfig{
+        Type:         "enabled",
+        BudgetTokens: 10000,
+    }),
+)
+```
+
+When enabled, the model's internal reasoning appears in `result.Reasoning` (non-streaming) or as `ReasoningStartPart` / `ReasoningDeltaPart` / `ReasoningEndPart` events (streaming).
+
+### Supported Features
+
+| Feature | Supported |
+|---------|-----------|
+| Text generation | ✅ |
+| Streaming (SSE) | ✅ |
+| Tool/function calling | ✅ |
+| Vision (image inputs) | ✅ |
+| Extended thinking | ✅ |
+| Token usage reporting | ✅ |
+| Cached token details | ✅ |
+
+---
+
+## Google Gemini Provider
+
+The `provider/google/generativeai` package implements the [Google Generative AI API](https://ai.google.dev/api) for Gemini models.
+
+### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/google/generativeai"
+
+provider := generativeai.New(
+    generativeai.WithAPIKey("AIza..."),
+)
+model := provider.ChatModel("gemini-2.5-flash")
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `x-goog-api-key` header |
+| `WithBaseURL(url)` | `https://generativelanguage.googleapis.com/v1beta` | Base URL |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+### Model ID
+
+The model ID can be a simple name or a full resource path:
+
+```go
+// Simple name — resolved to "models/gemini-2.5-flash"
+model := provider.ChatModel("gemini-2.5-flash")
+
+// Full path — used as-is
+model := provider.ChatModel("publishers/google/models/gemini-2.5-flash")
+```
+
+### API Endpoints
+
+| Operation | Endpoint |
+|-----------|----------|
+| Non-streaming | `POST {baseURL}/models/{modelId}:generateContent` |
+| Streaming | `POST {baseURL}/models/{modelId}:streamGenerateContent?alt=sse` |
+
+### How Messages Are Mapped
+
+The provider automatically converts SDK messages to Google's format:
+
+| SDK | Google API |
+|-----|-----------|
+| `System` param | `systemInstruction` field (separate from `contents`) |
+| User message | `{role: "user", parts: [{text: "..."}, ...]}` |
+| Assistant message | `{role: "model", parts: [{text: "..."}, {functionCall: ...}]}` |
+| Tool result message | `{role: "user", parts: [{functionResponse: {name, response}}]}` |
+
+### Tool Choice Mapping
+
+| SDK `ToolChoice` | Google `functionCallingConfig.mode` |
+|------------------|-------------------------------------|
+| `"auto"` | `AUTO` |
+| `"none"` | `NONE` |
+| `"required"` | `ANY` |
+
+### Thinking / Reasoning
+
+Gemini 2.5+ models support thinking (reasoning). The model returns parts with `thought: true` which the provider maps to `Reasoning` in the result:
+
+```go
+provider := generativeai.New(generativeai.WithAPIKey("AIza..."))
+model := provider.ChatModel("gemini-2.5-flash")
+
+result, _ := sdk.GenerateTextResult(ctx,
+    sdk.WithModel(model),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("What is 15 * 37? Think step by step."),
+    }),
+)
+fmt.Println(result.Reasoning) // model's thinking process
+fmt.Println(result.Text)      // final answer
+```
+
+### Supported Features
+
+| Feature | Supported |
+|---------|-----------|
+| Text generation | ✅ |
+| Streaming (SSE) | ✅ |
+| Tool/function calling | ✅ |
+| Vision (image inputs) | ✅ |
+| Thinking / Reasoning (Gemini 2.5+) | ✅ |
+| JSON mode | ✅ |
+| Token usage reporting | ✅ |
+| Cached content token details | ✅ |
+
+---
 
 ## Implementing a Custom Provider
 

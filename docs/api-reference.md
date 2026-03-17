@@ -456,32 +456,111 @@ type ResponseMetadata struct {
 
 ---
 
-## Package `provider/openai`
+## Package `provider/openai/completions`
 
-### OpenAICompletionsProvider
+### Provider
 
 ```go
-type OpenAICompletionsProvider struct { /* unexported */ }
+type Provider struct { /* unexported */ }
 
-func NewCompletions(options ...OpenAICompletionsProviderOption) *OpenAICompletionsProvider
+func New(options ...Option) *Provider
 ```
 
-Implements `sdk.Provider`. Uses the OpenAI Chat Completions API.
+Implements `sdk.Provider`. Uses the OpenAI Chat Completions API (`/chat/completions`).
 
 #### Options
 
 ```go
-func WithAPIKey(apiKey string) OpenAICompletionsProviderOption
-func WithBaseURL(baseURL string) OpenAICompletionsProviderOption
-func WithHTTPClient(client *http.Client) OpenAICompletionsProviderOption
+type Option func(*Provider)
+
+func WithAPIKey(apiKey string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
 ```
 
 #### Methods
 
 ```go
-func (p *OpenAICompletionsProvider) Name() string                  // "openai-completions"
-func (p *OpenAICompletionsProvider) GetModels() ([]sdk.Model, error)
-func (p *OpenAICompletionsProvider) ChatModel(id string) *sdk.Model
-func (p *OpenAICompletionsProvider) DoGenerate(ctx, params) (*sdk.GenerateResult, error)
-func (p *OpenAICompletionsProvider) DoStream(ctx, params) (*sdk.StreamResult, error)
+func (p *Provider) Name() string                  // "openai-completions"
+func (p *Provider) GetModels() ([]sdk.Model, error)
+func (p *Provider) ChatModel(id string) *sdk.Model
+func (p *Provider) DoGenerate(ctx, params) (*sdk.GenerateResult, error)
+func (p *Provider) DoStream(ctx, params) (*sdk.StreamResult, error)
 ```
+
+---
+
+## Package `provider/openai/responses`
+
+### Provider
+
+```go
+type Provider struct { /* unexported */ }
+
+func New(options ...Option) *Provider
+```
+
+Implements `sdk.Provider`. Uses the OpenAI Responses API (`/responses`). Supports reasoning models (o3, o4-mini) with first-class reasoning summaries, URL citation annotations, and a flat input format.
+
+#### Options
+
+```go
+type Option func(*Provider)
+
+func WithAPIKey(apiKey string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
+```
+
+#### Methods
+
+```go
+func (p *Provider) Name() string                  // "openai-responses"
+func (p *Provider) GetModels() ([]sdk.Model, error)
+func (p *Provider) ChatModel(id string) *sdk.Model
+func (p *Provider) DoGenerate(ctx, params) (*sdk.GenerateResult, error)
+func (p *Provider) DoStream(ctx, params) (*sdk.StreamResult, error)
+```
+
+#### Responses API-Specific Behavior
+
+**Input Conversion**: The provider converts `sdk.Message` types into the Responses API's flat input format:
+
+| SDK Message | Responses Input Type |
+|-------------|---------------------|
+| System message | `{ "type": "message", "role": "system" }` |
+| User message (text) | `{ "type": "message", "role": "user" }` |
+| User message (image) | Content part with `{ "type": "input_image" }` |
+| Assistant message | `{ "type": "message", "role": "assistant" }` |
+| Assistant reasoning | `{ "type": "reasoning" }` item |
+| Tool call | `{ "type": "function_call" }` |
+| Tool result | `{ "type": "function_call_output" }` |
+
+**Output Parsing**: Responses API output items are mapped to SDK types:
+
+| Responses Output | SDK Result |
+|-----------------|------------|
+| `message` with text content | `GenerateResult.Text` |
+| `reasoning` | `GenerateResult.Reasoning` |
+| `function_call` | `GenerateResult.ToolCalls` |
+| URL citation annotations | `GenerateResult.Sources` |
+
+**Finish Reason Mapping**:
+
+| API Condition | SDK FinishReason |
+|--------------|-----------------|
+| No `incomplete_details` | `stop` |
+| `incomplete_details.reason == "max_output_tokens"` | `length` |
+| `incomplete_details.reason == "content_filter"` | `content-filter` |
+| Has function calls | `tool-calls` |
+
+**Streaming Events**: The provider handles these SSE event types:
+
+| SSE Event | SDK StreamPart |
+|-----------|---------------|
+| `response.output_text.delta` | `TextDeltaPart` |
+| `response.reasoning_summary_text.delta` | `ReasoningDeltaPart` |
+| `response.function_call_arguments.delta` | `ToolInputDeltaPart` |
+| `response.output_item.done` (function_call) | `ToolInputEndPart` |
+| `response.output_text.annotation.added` (url_citation) | `StreamSourcePart` |
+| `response.completed` / `response.incomplete` | `FinishStepPart` + `FinishPart` |

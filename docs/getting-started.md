@@ -5,7 +5,7 @@ This guide walks you through installing Twilight AI and making your first LLM re
 ## Prerequisites
 
 - Go 1.25 or later
-- An API key from OpenAI (or any OpenAI-compatible provider)
+- An API key from OpenAI, Anthropic, Google, or any OpenAI-compatible provider
 
 ## Installation
 
@@ -17,22 +17,41 @@ go get github.com/memohai/twilight-ai
 
 ### 1. Create a Provider
 
-A **Provider** is the bridge between the SDK and a specific AI backend. The SDK ships with an OpenAI provider that works with OpenAI, Azure OpenAI, DeepSeek, Groq, and any other OpenAI-compatible API.
+A **Provider** is the bridge between the SDK and a specific AI backend. The SDK ships with two OpenAI providers:
+
+**Chat Completions** — broad compatibility with OpenAI and all OpenAI-compatible APIs:
 
 ```go
-import "github.com/memohai/twilight-ai/provider/openai"
+import "github.com/memohai/twilight-ai/provider/openai/completions"
 
-provider := openai.NewCompletions(
-    openai.WithAPIKey("sk-..."),
+provider := completions.New(
+    completions.WithAPIKey("sk-..."),
 )
 ```
 
-For OpenAI-compatible endpoints, add `WithBaseURL`:
+**Responses** — OpenAI's newer API with native reasoning and citation support:
 
 ```go
-provider := openai.NewCompletions(
-    openai.WithAPIKey("your-key"),
-    openai.WithBaseURL("https://api.deepseek.com/v1"),
+import "github.com/memohai/twilight-ai/provider/openai/responses"
+
+provider := responses.New(
+    responses.WithAPIKey("sk-..."),
+)
+```
+
+For OpenAI-compatible endpoints, add a custom base URL:
+
+```go
+// Completions API
+provider := completions.New(
+    completions.WithAPIKey("your-key"),
+    completions.WithBaseURL("https://api.deepseek.com/v1"),
+)
+
+// Responses API (e.g. via OpenRouter)
+provider := responses.New(
+    responses.WithAPIKey("sk-or-v1-..."),
+    responses.WithBaseURL("https://openrouter.ai/api/v1"),
 )
 ```
 
