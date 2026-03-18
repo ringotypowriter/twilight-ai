@@ -7,7 +7,9 @@ A **Provider** is the abstraction that connects the SDK to an AI backend. It han
 ```go
 type Provider interface {
     Name() string
-    GetModels() ([]Model, error)
+    ListModels(ctx context.Context) ([]Model, error)
+    Test(ctx context.Context) *ProviderTestResult
+    TestModel(ctx context.Context, modelID string) (*ModelTestResult, error)
     DoGenerate(ctx context.Context, params GenerateParams) (*GenerateResult, error)
     DoStream(ctx context.Context, params GenerateParams) (*StreamResult, error)
 }
@@ -16,7 +18,9 @@ type Provider interface {
 | Method | Purpose |
 |--------|---------|
 | `Name()` | Returns a human-readable provider identifier (e.g. `"openai-completions"`) |
-| `GetModels()` | Lists available models (optional, may return nil) |
+| `ListModels(ctx)` | Fetches available models from the backend API |
+| `Test(ctx)` | Health check returning one of three states (see below) |
+| `TestModel(ctx, id)` | Checks whether a specific model ID is supported |
 | `DoGenerate()` | Performs a single non-streaming LLM call |
 | `DoStream()` | Performs a streaming LLM call, returning a channel of `StreamPart` |
 
@@ -29,6 +33,46 @@ type Model struct {
     Provider    Provider
     Type        ModelType   // "chat"
     MaxTokens   int
+}
+```
+
+`Model` also has a `Test(ctx)` method that delegates to `Provider.TestModel`.
+
+### Provider Health Check
+
+`Test(ctx)` returns a `*ProviderTestResult` with one of three statuses:
+
+| Status | Meaning |
+|--------|---------|
+| `ProviderStatusOK` | Connected and API key is valid |
+| `ProviderStatusUnhealthy` | TCP connection succeeded but API returned an error (e.g. 401/403 auth failure) |
+| `ProviderStatusUnreachable` | Cannot establish a network connection to the endpoint |
+
+```go
+result := provider.Test(ctx)
+if result.Status != sdk.ProviderStatusOK {
+    log.Fatalf("provider issue: %s (error: %v)", result.Message, result.Error)
+}
+```
+
+### Model Discovery
+
+`ListModels(ctx)` returns all models available from the provider. Each returned `Model` is bound to the provider and ready for use:
+
+```go
+models, err := provider.ListModels(ctx)
+for _, m := range models {
+    fmt.Printf("%-40s %s\n", m.ID, m.DisplayName)
+}
+```
+
+To check a single model without listing all:
+
+```go
+model := provider.ChatModel("gpt-4o")
+result, err := model.Test(ctx)
+if result.Supported {
+    // safe to use this model
 }
 ```
 
@@ -54,6 +98,14 @@ model := provider.ChatModel("gpt-4o-mini")
 | `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
 | `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
 | `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client (for proxies, timeouts, etc.) |
+
+### API Endpoints for Discovery
+
+| Method | API Endpoint |
+|--------|-------------|
+| `ListModels` | `GET /models` |
+| `Test` | `GET /models?limit=1` |
+| `TestModel` | `GET /models/{id}` |
 
 ### OpenAI-Compatible Providers
 
@@ -96,6 +148,7 @@ provider := completions.New(
 | JSON mode / JSON Schema | ✅ |
 | Token usage reporting | ✅ |
 | Cached token details | ✅ |
+| ListModels / Test / TestModel | ✅ |
 
 ### Custom HTTP Client
 
@@ -148,6 +201,14 @@ model := provider.ChatModel("gpt-4o-mini")
 | `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
 | `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
 
+### API Endpoints for Discovery
+
+| Method | API Endpoint |
+|--------|-------------|
+| `ListModels` | `GET /models` |
+| `Test` | `GET /models?limit=1` |
+| `TestModel` | `GET /models/{id}` |
+
 ### Using with OpenRouter
 
 OpenRouter supports the Responses API as a beta feature:
@@ -192,6 +253,7 @@ In streaming mode, reasoning arrives as `ReasoningStartPart` / `ReasoningDeltaPa
 | JSON mode / JSON Schema | ✅ |
 | Token usage reporting | ✅ |
 | Cached / reasoning token details | ✅ |
+| ListModels / Test / TestModel | ✅ |
 
 ## Anthropic Provider
 
@@ -245,6 +307,15 @@ When enabled, the model's internal reasoning appears in `result.Reasoning` (non-
 | Extended thinking | ✅ |
 | Token usage reporting | ✅ |
 | Cached token details | ✅ |
+| ListModels / Test / TestModel | ✅ |
+
+### API Endpoints for Discovery
+
+| Method | API Endpoint |
+|--------|-------------|
+| `ListModels` | `GET /v1/models` |
+| `Test` | `GET /v1/models?limit=1` |
+| `TestModel` | `GET /v1/models/{id}` |
 
 ---
 
@@ -339,6 +410,145 @@ fmt.Println(result.Text)      // final answer
 | JSON mode | ✅ |
 | Token usage reporting | ✅ |
 | Cached content token details | ✅ |
+| ListModels / Test / TestModel | ✅ |
+
+### API Endpoints for Discovery
+
+| Method | API Endpoint |
+|--------|-------------|
+| `ListModels` | `GET /v1beta/models` |
+| `Test` | `GET /v1beta/models?pageSize=1` |
+| `TestModel` | `GET /v1beta/models/{id}` |
+
+---
+
+## Embedding Providers
+
+Embedding providers implement the `sdk.EmbeddingProvider` interface and are separate from chat providers. They generate vector representations of text for use in search, retrieval, clustering, and other similarity-based tasks.
+
+```go
+type EmbeddingProvider interface {
+    DoEmbed(ctx context.Context, params EmbedParams) (*EmbedResult, error)
+}
+```
+
+### OpenAI Embedding Provider
+
+The `provider/openai/embedding` package provides text embeddings via the OpenAI `/embeddings` endpoint.
+
+#### Basic Usage
+
+```go
+import (
+    "github.com/memohai/twilight-ai/provider/openai/embedding"
+    "github.com/memohai/twilight-ai/sdk"
+)
+
+provider := embedding.New(
+    embedding.WithAPIKey("sk-..."),
+)
+model := provider.EmbeddingModel("text-embedding-3-small")
+
+// Single embedding
+vec, err := sdk.Embed(ctx, "Hello world", sdk.WithEmbeddingModel(model))
+
+// Batch embeddings
+result, err := sdk.EmbedMany(ctx,
+    []string{"Hello", "World"},
+    sdk.WithEmbeddingModel(model),
+)
+```
+
+#### Custom Dimensions
+
+Models like `text-embedding-3-small` and `text-embedding-3-large` support custom output dimensions:
+
+```go
+vec, err := sdk.Embed(ctx, "Hello world",
+    sdk.WithEmbeddingModel(model),
+    sdk.WithDimensions(256),
+)
+```
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+#### OpenAI-Compatible Endpoints
+
+Any service that implements the OpenAI Embeddings API works:
+
+```go
+// Ollama
+provider := embedding.New(
+    embedding.WithBaseURL("http://localhost:11434/v1"),
+)
+model := provider.EmbeddingModel("nomic-embed-text")
+```
+
+### Google Embedding Provider
+
+The `provider/google/embedding` package provides text embeddings via the Google Generative AI API.
+
+#### Basic Usage
+
+```go
+import (
+    "github.com/memohai/twilight-ai/provider/google/embedding"
+    "github.com/memohai/twilight-ai/sdk"
+)
+
+provider := embedding.New(
+    embedding.WithAPIKey("AIza..."),
+)
+model := provider.EmbeddingModel("gemini-embedding-001")
+
+vec, err := sdk.Embed(ctx, "Hello world", sdk.WithEmbeddingModel(model))
+```
+
+#### Task Types
+
+Google embedding models support a `taskType` parameter to optimize the embedding for a specific use case:
+
+```go
+provider := embedding.New(
+    embedding.WithAPIKey("AIza..."),
+    embedding.WithTaskType("RETRIEVAL_DOCUMENT"),
+)
+```
+
+| Task Type | Use Case |
+|-----------|----------|
+| `RETRIEVAL_QUERY` | Query text for search/retrieval |
+| `RETRIEVAL_DOCUMENT` | Document text being indexed |
+| `SEMANTIC_SIMILARITY` | Comparing text similarity |
+| `CLASSIFICATION` | Text classification |
+| `CLUSTERING` | Text clustering |
+| `QUESTION_ANSWERING` | Question answering |
+| `FACT_VERIFICATION` | Fact verification |
+| `CODE_RETRIEVAL_QUERY` | Code search queries |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `x-goog-api-key` header |
+| `WithBaseURL(url)` | `https://generativelanguage.googleapis.com/v1beta` | Base URL |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+| `WithTaskType(taskType)` | `""` | Default task type for all requests |
+
+#### API Endpoints
+
+| Scenario | Endpoint |
+|----------|----------|
+| Single value | `POST {baseURL}/models/{modelId}:embedContent` |
+| Multiple values | `POST {baseURL}/models/{modelId}:batchEmbedContents` |
+
+The provider automatically selects the optimal endpoint based on the number of input values.
 
 ---
 
@@ -366,10 +576,38 @@ func (p *MyProvider) Name() string {
     return "my-provider"
 }
 
-func (p *MyProvider) GetModels() ([]sdk.Model, error) {
+func (p *MyProvider) ListModels(ctx context.Context) ([]sdk.Model, error) {
+    // Fetch models from your backend's API
     return []sdk.Model{
         {ID: "my-model-v1", Provider: p, Type: sdk.ModelTypeChat},
     }, nil
+}
+
+func (p *MyProvider) Test(ctx context.Context) *sdk.ProviderTestResult {
+    // Try a lightweight API call to verify connectivity
+    _, err := p.ListModels(ctx)
+    if err != nil {
+        return &sdk.ProviderTestResult{
+            Status:  sdk.ProviderStatusUnreachable,
+            Message: err.Error(),
+            Error:   err,
+        }
+    }
+    return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+}
+
+func (p *MyProvider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error) {
+    // Check if a specific model exists
+    models, err := p.ListModels(ctx)
+    if err != nil {
+        return nil, err
+    }
+    for _, m := range models {
+        if m.ID == modelID {
+            return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+        }
+    }
+    return &sdk.ModelTestResult{Supported: false, Message: "model not found"}, nil
 }
 
 func (p *MyProvider) ChatModel(id string) *sdk.Model {
@@ -378,7 +616,6 @@ func (p *MyProvider) ChatModel(id string) *sdk.Model {
 
 func (p *MyProvider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
     // Make HTTP request to your backend...
-    // Map the response to *sdk.GenerateResult
     return &sdk.GenerateResult{
         Text:         "response text",
         FinishReason: sdk.FinishReasonStop,
@@ -390,7 +627,6 @@ func (p *MyProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*
 
     go func() {
         defer close(ch)
-        // Stream chunks from your backend...
         ch <- &sdk.StartPart{}
         ch <- &sdk.StartStepPart{}
         ch <- &sdk.TextStartPart{}
@@ -418,6 +654,7 @@ text, err := sdk.GenerateText(ctx,
 
 ## Next Steps
 
+- [Embeddings](embeddings.md) — generate vector embeddings with OpenAI and Google
 - [Tool Calling](tools.md) — define tools and enable multi-step execution
 - [Streaming](streaming.md) — understand StreamPart types
 - [API Reference](api-reference.md) — complete type and function reference

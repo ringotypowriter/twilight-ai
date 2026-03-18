@@ -7,12 +7,14 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 
 ## Features
 
-- **Simple API** — `GenerateText` and `StreamText`, two functions cover most use cases
+- **Simple API** — `GenerateText`, `StreamText`, `Embed`, and `EmbedMany` cover most use cases
 - **Provider-agnostic** — swap between OpenAI, Anthropic, Google, or any OpenAI-compatible endpoint
+- **Model discovery** — `ListModels` fetches available models, `Test` checks provider connectivity and model support
 - **Tool calling** — define tools with Go structs, SDK infers JSON Schema and handles multi-step execution
 - **Streaming** — first-class channel-based streaming with fine-grained `StreamPart` types
 - **Multi-step execution** — automatic tool-call loop with configurable `MaxSteps`
 - **Rich message types** — text, images, files, reasoning content, tool calls/results
+- **Embeddings** — generate embeddings with `Embed` / `EmbedMany`, supports OpenAI and Google providers
 - **Approval flow** — optional human-in-the-loop approval for sensitive tool calls
 - **Minimal dependencies** — only [google/jsonschema-go](https://github.com/google/jsonschema-go) beyond the standard library
 
@@ -177,12 +179,82 @@ result, err := sdk.GenerateTextResult(ctx,
 )
 ```
 
+### Embeddings
+
+Generate vector embeddings for text using OpenAI or Google:
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/embedding"
+
+provider := embedding.New(embedding.WithAPIKey("sk-..."))
+model := provider.EmbeddingModel("text-embedding-3-small")
+
+// Single value
+vec, err := sdk.Embed(ctx, "Hello world", sdk.WithEmbeddingModel(model))
+// vec is []float64
+
+// Multiple values
+result, err := sdk.EmbedMany(ctx, []string{"Hello", "World"},
+    sdk.WithEmbeddingModel(model),
+    sdk.WithDimensions(256),
+)
+// result.Embeddings is [][]float64
+// result.Usage.Tokens reports token consumption
+```
+
+Google Gemini embeddings:
+
+```go
+import "github.com/memohai/twilight-ai/provider/google/embedding"
+
+provider := embedding.New(
+    embedding.WithAPIKey("AIza..."),
+    embedding.WithTaskType("RETRIEVAL_DOCUMENT"),
+)
+model := provider.EmbeddingModel("gemini-embedding-001")
+
+vec, err := sdk.Embed(ctx, "Hello world", sdk.WithEmbeddingModel(model))
+```
+
+### Provider Health Check & Model Discovery
+
+Test connectivity and discover available models before making generation requests:
+
+```go
+provider := completions.New(completions.WithAPIKey("sk-..."))
+
+// Check provider connectivity
+result := provider.Test(context.Background())
+switch result.Status {
+case sdk.ProviderStatusOK:
+    fmt.Println("Provider is healthy")
+case sdk.ProviderStatusUnhealthy:
+    fmt.Println("Connected but unhealthy:", result.Message)
+case sdk.ProviderStatusUnreachable:
+    fmt.Println("Cannot connect:", result.Message)
+}
+
+// List all available models
+models, err := provider.ListModels(context.Background())
+for _, m := range models {
+    fmt.Println(m.ID)
+}
+
+// Check if a specific model is supported
+model := provider.ChatModel("gpt-4o")
+testResult, err := model.Test(context.Background())
+if testResult.Supported {
+    fmt.Println("Model is supported")
+}
+```
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation, setup, and first request |
 | [Providers](docs/providers.md) | Provider interface, OpenAI, Anthropic, and Google Gemini |
+| [Embeddings](docs/embeddings.md) | Generate vector embeddings with OpenAI and Google |
 | [Tool Calling](docs/tools.md) | Defining tools, multi-step execution, approval flow |
 | [Streaming](docs/streaming.md) | Channel-based streaming and StreamPart types |
 | [API Reference](docs/api-reference.md) | Complete type and function reference |
@@ -197,6 +269,8 @@ result, err := sdk.GenerateTextResult(ctx,
 | OpenRouter Responses | `responses.New()` + `WithBaseURL` | `/responses` | ✅ Stable |
 | Anthropic | `messages.New()` | `/messages` | ✅ Stable |
 | Google Gemini | `generativeai.New()` | Generative AI API | ✅ Stable |
+| OpenAI Embeddings | `embedding.New()` | `/embeddings` | ✅ Stable |
+| Google Embeddings | `embedding.New()` | `embedContent` / `batchEmbedContents` | ✅ Stable |
 
 ## License
 

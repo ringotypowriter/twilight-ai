@@ -131,6 +131,82 @@ sr, err := sdk.StreamText(ctx, sdk.WithModel(model), ...)
 text, err := sr.Text()
 ```
 
+### 6. Test Provider Connectivity
+
+Before making generation requests, you can verify that your API key and endpoint are working:
+
+```go
+result := provider.Test(ctx)
+switch result.Status {
+case sdk.ProviderStatusOK:
+    fmt.Println("Ready to go!")
+case sdk.ProviderStatusUnhealthy:
+    fmt.Printf("Connected but auth failed: %s\n", result.Message)
+case sdk.ProviderStatusUnreachable:
+    fmt.Printf("Cannot reach endpoint: %s\n", result.Message)
+}
+```
+
+### 7. Discover Available Models
+
+List all models your API key has access to:
+
+```go
+models, err := provider.ListModels(ctx)
+for _, m := range models {
+    fmt.Println(m.ID)
+}
+```
+
+Or check a single model:
+
+```go
+model := provider.ChatModel("gpt-4o")
+testResult, _ := model.Test(ctx)
+fmt.Println(testResult.Supported) // true or false
+```
+
+### 6. Generate Embeddings
+
+Embeddings convert text into numeric vectors for search, retrieval, and similarity comparison. Embedding providers are separate from chat providers:
+
+```go
+import "github.com/memohai/twilight-ai/provider/openai/embedding"
+
+embProvider := embedding.New(
+    embedding.WithAPIKey("sk-..."),
+)
+embModel := embProvider.EmbeddingModel("text-embedding-3-small")
+
+vec, err := sdk.Embed(ctx, "What is the capital of France?",
+    sdk.WithEmbeddingModel(embModel),
+)
+// vec is a []float64 vector
+
+// Embed multiple texts at once
+result, err := sdk.EmbedMany(ctx, []string{"Paris", "London", "Berlin"},
+    sdk.WithEmbeddingModel(embModel),
+)
+// result.Embeddings[0] is the vector for "Paris"
+// result.Usage.Tokens reports total tokens consumed
+```
+
+For Google embeddings, use the Google embedding provider:
+
+```go
+import "github.com/memohai/twilight-ai/provider/google/embedding"
+
+embProvider := embedding.New(
+    embedding.WithAPIKey("AIza..."),
+    embedding.WithTaskType("RETRIEVAL_QUERY"),
+)
+embModel := embProvider.EmbeddingModel("gemini-embedding-001")
+
+vec, err := sdk.Embed(ctx, "search query here",
+    sdk.WithEmbeddingModel(embModel),
+)
+```
+
 ## Using a Client Instance
 
 The package-level functions (`sdk.GenerateText`, `sdk.StreamText`) use a default client. You can also create your own:
@@ -155,6 +231,7 @@ OPENAI_MODEL=gpt-4o-mini
 ## Next Steps
 
 - [Providers](providers.md) — learn about the Provider interface and OpenAI options
+- [Embeddings](embeddings.md) — generate vector embeddings with OpenAI and Google
 - [Tool Calling](tools.md) — define tools and enable multi-step execution
 - [Streaming](streaming.md) — understand StreamPart types and advanced patterns
 - [API Reference](api-reference.md) — complete type and function reference

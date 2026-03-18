@@ -51,9 +51,51 @@ func StreamText(ctx context.Context, options ...GenerateOption) (*StreamResult, 
 ```go
 type Provider interface {
     Name() string
-    GetModels() ([]Model, error)
+    ListModels(ctx context.Context) ([]Model, error)
+    Test(ctx context.Context) *ProviderTestResult
+    TestModel(ctx context.Context, modelID string) (*ModelTestResult, error)
     DoGenerate(ctx context.Context, params GenerateParams) (*GenerateResult, error)
     DoStream(ctx context.Context, params GenerateParams) (*StreamResult, error)
+}
+```
+
+| Method | Purpose |
+|--------|---------|
+| `Name()` | Returns a provider identifier (e.g. `"openai-completions"`) |
+| `ListModels(ctx)` | Fetches available models from the backend API |
+| `Test(ctx)` | Health check: returns OK, Unhealthy, or Unreachable |
+| `TestModel(ctx, id)` | Checks if a specific model ID is supported |
+| `DoGenerate(ctx, params)` | Performs a single non-streaming LLM call |
+| `DoStream(ctx, params)` | Performs a streaming LLM call |
+
+#### ProviderStatus
+
+```go
+type ProviderStatus string
+
+const (
+    ProviderStatusOK          ProviderStatus = "ok"          // Connected and healthy
+    ProviderStatusUnhealthy   ProviderStatus = "unhealthy"   // Connected but health check failed
+    ProviderStatusUnreachable ProviderStatus = "unreachable" // Cannot connect
+)
+```
+
+#### ProviderTestResult
+
+```go
+type ProviderTestResult struct {
+    Status  ProviderStatus
+    Message string
+    Error   error
+}
+```
+
+#### ModelTestResult
+
+```go
+type ModelTestResult struct {
+    Supported bool
+    Message   string
 }
 ```
 
@@ -71,6 +113,14 @@ type Model struct {
 type ModelType string
 const ModelTypeChat ModelType = "chat"
 ```
+
+#### Methods
+
+```go
+func (m *Model) Test(ctx context.Context) (*ModelTestResult, error)
+```
+
+Checks whether this model is supported by its provider. Delegates to `Provider.TestModel`.
 
 ---
 
@@ -456,6 +506,211 @@ type ResponseMetadata struct {
 
 ---
 
+### Embedding
+
+#### EmbeddingProvider
+
+```go
+type EmbeddingProvider interface {
+    DoEmbed(ctx context.Context, params EmbedParams) (*EmbedResult, error)
+}
+```
+
+The interface that embedding backends must implement.
+
+#### EmbeddingModel
+
+```go
+type EmbeddingModel struct {
+    ID                   string
+    Provider             EmbeddingProvider
+    MaxEmbeddingsPerCall int
+}
+```
+
+Represents an embedding model bound to an `EmbeddingProvider`. `MaxEmbeddingsPerCall` indicates the maximum number of input values per single API call (typically 2048).
+
+#### EmbedParams
+
+```go
+type EmbedParams struct {
+    Model      *EmbeddingModel
+    Values     []string
+    Dimensions *int
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `Model` | **Required.** The embedding model to use |
+| `Values` | Input texts to embed |
+| `Dimensions` | Optional output dimensionality (not all models support this) |
+
+#### EmbedResult
+
+```go
+type EmbedResult struct {
+    Embeddings [][]float64
+    Usage      EmbeddingUsage
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `Embeddings` | One `[]float64` vector per input value |
+| `Usage` | Token usage for the request |
+
+#### EmbeddingUsage
+
+```go
+type EmbeddingUsage struct {
+    Tokens int
+}
+```
+
+#### Embed Options
+
+All options are of type `EmbedOption` (`func(*embedConfig)`).
+
+| Function | Description |
+|----------|-------------|
+| `WithEmbeddingModel(model *EmbeddingModel)` | **Required.** The embedding model to use |
+| `WithDimensions(d int)` | Output dimensionality (model-dependent) |
+
+#### Client Methods
+
+```go
+func (c *Client) Embed(ctx context.Context, value string, options ...EmbedOption) ([]float64, error)
+func (c *Client) EmbedMany(ctx context.Context, values []string, options ...EmbedOption) (*EmbedResult, error)
+```
+
+| Method | Description |
+|--------|-------------|
+| `Embed` | Generates an embedding for a single string; returns the vector |
+| `EmbedMany` | Generates embeddings for multiple strings; returns the full result |
+
+#### Package-Level Functions
+
+```go
+func Embed(ctx context.Context, value string, options ...EmbedOption) ([]float64, error)
+func EmbedMany(ctx context.Context, values []string, options ...EmbedOption) (*EmbedResult, error)
+```
+
+These use the default client instance, equivalent to `client.Embed` and `client.EmbedMany`.
+
+---
+
+## Package `provider/openai/embedding`
+
+### Provider
+
+```go
+type Provider struct { /* unexported */ }
+
+func New(options ...Option) *Provider
+```
+
+Implements `sdk.EmbeddingProvider`. Uses the OpenAI Embeddings API (`/embeddings`).
+
+#### Options
+
+```go
+type Option func(*Provider)
+
+func WithAPIKey(apiKey string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+#### Methods
+
+```go
+func (p *Provider) EmbeddingModel(id string) *sdk.EmbeddingModel
+func (p *Provider) DoEmbed(ctx context.Context, params sdk.EmbedParams) (*sdk.EmbedResult, error)
+```
+
+| Method | Description |
+|--------|-------------|
+| `EmbeddingModel(id)` | Creates an `EmbeddingModel` bound to this provider (MaxEmbeddingsPerCall: 2048) |
+| `DoEmbed(ctx, params)` | Sends a `POST /embeddings` request with `encoding_format: "float"` |
+
+#### Supported Models
+
+Any model available via the OpenAI `/embeddings` endpoint, including:
+- `text-embedding-3-small`
+- `text-embedding-3-large`
+- `text-embedding-ada-002`
+
+---
+
+## Package `provider/google/embedding`
+
+### Provider
+
+```go
+type Provider struct { /* unexported */ }
+
+func New(options ...Option) *Provider
+```
+
+Implements `sdk.EmbeddingProvider`. Uses the Google Generative AI Embedding API.
+
+#### Options
+
+```go
+type Option func(*Provider)
+
+func WithAPIKey(apiKey string) Option
+func WithBaseURL(baseURL string) Option
+func WithHTTPClient(client *http.Client) Option
+func WithTaskType(taskType string) Option
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | API key sent as `x-goog-api-key` header |
+| `WithBaseURL(url)` | `https://generativelanguage.googleapis.com/v1beta` | Base URL |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+| `WithTaskType(taskType)` | `""` | Default task type for all requests |
+
+#### Task Types
+
+| Value | Use Case |
+|-------|----------|
+| `RETRIEVAL_QUERY` | Query text for search/retrieval |
+| `RETRIEVAL_DOCUMENT` | Document text being indexed |
+| `SEMANTIC_SIMILARITY` | Comparing text similarity |
+| `CLASSIFICATION` | Text classification |
+| `CLUSTERING` | Text clustering |
+| `QUESTION_ANSWERING` | Question answering |
+| `FACT_VERIFICATION` | Fact verification |
+| `CODE_RETRIEVAL_QUERY` | Code search queries |
+
+#### Methods
+
+```go
+func (p *Provider) EmbeddingModel(id string) *sdk.EmbeddingModel
+func (p *Provider) DoEmbed(ctx context.Context, params sdk.EmbedParams) (*sdk.EmbedResult, error)
+```
+
+| Method | Description |
+|--------|-------------|
+| `EmbeddingModel(id)` | Creates an `EmbeddingModel` bound to this provider (MaxEmbeddingsPerCall: 2048) |
+| `DoEmbed(ctx, params)` | Single value: `embedContent`; multiple values: `batchEmbedContents` |
+
+#### Supported Models
+
+- `gemini-embedding-001`
+- `text-embedding-004`
+
+---
+
 ## Package `provider/openai/completions`
 
 ### Provider
@@ -482,11 +737,19 @@ func WithHTTPClient(client *http.Client) Option
 
 ```go
 func (p *Provider) Name() string                  // "openai-completions"
-func (p *Provider) GetModels() ([]sdk.Model, error)
 func (p *Provider) ChatModel(id string) *sdk.Model
+func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error)
+func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult
+func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error)
 func (p *Provider) DoGenerate(ctx, params) (*sdk.GenerateResult, error)
 func (p *Provider) DoStream(ctx, params) (*sdk.StreamResult, error)
 ```
+
+| Method | API Endpoint |
+|--------|-------------|
+| `ListModels` | `GET /models` |
+| `Test` | `GET /models?limit=1` |
+| `TestModel` | `GET /models/{id}` |
 
 ---
 
@@ -516,11 +779,19 @@ func WithHTTPClient(client *http.Client) Option
 
 ```go
 func (p *Provider) Name() string                  // "openai-responses"
-func (p *Provider) GetModels() ([]sdk.Model, error)
 func (p *Provider) ChatModel(id string) *sdk.Model
+func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error)
+func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult
+func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error)
 func (p *Provider) DoGenerate(ctx, params) (*sdk.GenerateResult, error)
 func (p *Provider) DoStream(ctx, params) (*sdk.StreamResult, error)
 ```
+
+| Method | API Endpoint |
+|--------|-------------|
+| `ListModels` | `GET /models` |
+| `Test` | `GET /models?limit=1` |
+| `TestModel` | `GET /models/{id}` |
 
 #### Responses API-Specific Behavior
 
