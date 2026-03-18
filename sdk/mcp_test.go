@@ -63,7 +63,7 @@ func TestCreateMCPClient(t *testing.T) {
 	ctx := context.Background()
 	transport := startTestServer(t)
 
-	mc, err := CreateMCPClient(ctx, MCPClientConfig{
+	mc, err := CreateMCPClient(ctx, &MCPClientConfig{
 		Transport: transport,
 	})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestMCPClientTools(t *testing.T) {
 	ctx := context.Background()
 	transport := startTestServer(t)
 
-	mc, err := CreateMCPClient(ctx, MCPClientConfig{Transport: transport})
+	mc, err := CreateMCPClient(ctx, &MCPClientConfig{Transport: transport})
 	if err != nil {
 		t.Fatalf("CreateMCPClient: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestMCPToolExecute(t *testing.T) {
 	ctx := context.Background()
 	transport := startTestServer(t)
 
-	mc, err := CreateMCPClient(ctx, MCPClientConfig{Transport: transport})
+	mc, err := CreateMCPClient(ctx, &MCPClientConfig{Transport: transport})
 	if err != nil {
 		t.Fatalf("CreateMCPClient: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestResolveTransport(t *testing.T) {
 	t.Run("custom transport", func(t *testing.T) {
 		st, ct := mcp.NewInMemoryTransports()
 		_ = st
-		tr, err := resolveTransport(MCPClientConfig{Transport: ct})
+		tr, err := resolveTransport(&MCPClientConfig{Transport: ct})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -283,14 +283,14 @@ func TestResolveTransport(t *testing.T) {
 	})
 
 	t.Run("missing URL", func(t *testing.T) {
-		_, err := resolveTransport(MCPClientConfig{})
+		_, err := resolveTransport(&MCPClientConfig{})
 		if err == nil {
 			t.Fatal("expected error for missing URL")
 		}
 	})
 
 	t.Run("unsupported type", func(t *testing.T) {
-		_, err := resolveTransport(MCPClientConfig{
+		_, err := resolveTransport(&MCPClientConfig{
 			Type: "grpc",
 			URL:  "http://localhost",
 		})
@@ -300,7 +300,7 @@ func TestResolveTransport(t *testing.T) {
 	})
 
 	t.Run("http default", func(t *testing.T) {
-		tr, err := resolveTransport(MCPClientConfig{
+		tr, err := resolveTransport(&MCPClientConfig{
 			URL: "http://localhost:8080",
 		})
 		if err != nil {
@@ -312,7 +312,7 @@ func TestResolveTransport(t *testing.T) {
 	})
 
 	t.Run("sse", func(t *testing.T) {
-		tr, err := resolveTransport(MCPClientConfig{
+		tr, err := resolveTransport(&MCPClientConfig{
 			Type: MCPTransportSSE,
 			URL:  "http://localhost:8080",
 		})
@@ -329,7 +329,7 @@ func TestMCPClientConfigDefaults(t *testing.T) {
 	ctx := context.Background()
 	transport := startTestServer(t)
 
-	mc, err := CreateMCPClient(ctx, MCPClientConfig{
+	mc, err := CreateMCPClient(ctx, &MCPClientConfig{
 		Transport: transport,
 	})
 	if err != nil {
@@ -361,7 +361,7 @@ func TestMCPToolSchemaProperties(t *testing.T) {
 	ctx := context.Background()
 	transport := startTestServer(t)
 
-	mc, err := CreateMCPClient(ctx, MCPClientConfig{Transport: transport})
+	mc, err := CreateMCPClient(ctx, &MCPClientConfig{Transport: transport})
 	if err != nil {
 		t.Fatalf("CreateMCPClient: %v", err)
 	}

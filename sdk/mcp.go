@@ -58,7 +58,7 @@ type MCPClient struct {
 
 // CreateMCPClient connects to an MCP server described by config and returns a
 // ready-to-use MCPClient. The caller must call Close when done.
-func CreateMCPClient(ctx context.Context, config MCPClientConfig) (*MCPClient, error) {
+func CreateMCPClient(ctx context.Context, config *MCPClientConfig) (*MCPClient, error) {
 	transport, err := resolveTransport(config)
 	if err != nil {
 		return nil, fmt.Errorf("twilightai/mcp: %w", err)
@@ -105,7 +105,7 @@ func (c *MCPClient) Close() error {
 // Transport resolution
 // ---------------------------------------------------------------------------
 
-func resolveTransport(cfg MCPClientConfig) (mcp.Transport, error) {
+func resolveTransport(cfg *MCPClientConfig) (mcp.Transport, error) {
 	if cfg.Transport != nil {
 		return cfg.Transport, nil
 	}

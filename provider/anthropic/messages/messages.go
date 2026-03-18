@@ -443,30 +443,16 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 	go func() {
 		defer close(ch)
 
-		var (
-			rawFinishReason string
-			finishReason    sdk.FinishReason
-			usage           sdk.Usage
-			messageID       string
-			messageModel    string
-
-			// Track active content blocks by index for proper end handling.
-			activeBlocks = map[int]*streamingBlock{}
-		)
-
-		send := func(part sdk.StreamPart) bool {
-			select {
-			case ch <- part:
-				return true
-			case <-ctx.Done():
-				return false
-			}
+		h := &streamHandler{
+			ch:           ch,
+			ctx:          ctx,
+			activeBlocks: map[int]*streamingBlock{},
 		}
 
-		if !send(&sdk.StartPart{}) {
+		if !h.send(&sdk.StartPart{}) {
 			return
 		}
-		if !send(&sdk.StartStepPart{}) {
+		if !h.send(&sdk.StartStepPart{}) {
 			return
 		}
 
@@ -476,158 +462,198 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 			Path:    "/messages",
 			Headers: p.requestHeaders(),
 			Body:    req,
-		}, func(ev *utils.SSEEvent) error {
-			var event streamEvent
-			if err := json.Unmarshal([]byte(ev.Data), &event); err != nil {
-				send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: unmarshal event: %w", err)})
-				return err
-			}
-
-			switch event.Type {
-			case "message_start":
-				if event.Message != nil {
-					messageID = event.Message.ID
-					messageModel = event.Message.Model
-					usage = convertUsage(&event.Message.Usage)
-				}
-
-			case "content_block_start":
-				if event.Index == nil || event.ContentBlock == nil {
-					return nil
-				}
-				idx := *event.Index
-				cb := event.ContentBlock
-				switch cb.Type {
-				case blockTypeText:
-					activeBlocks[idx] = &streamingBlock{blockType: blockTypeText}
-					send(&sdk.TextStartPart{ID: messageID})
-				case blockTypeThinking:
-					activeBlocks[idx] = &streamingBlock{blockType: blockTypeThinking}
-					send(&sdk.ReasoningStartPart{ID: messageID})
-				case blockTypeToolUse:
-					activeBlocks[idx] = &streamingBlock{
-						blockType: blockTypeToolUse,
-						toolID:    cb.ID,
-						toolName:  cb.Name,
-					}
-					send(&sdk.ToolInputStartPart{
-						ID:       cb.ID,
-						ToolName: cb.Name,
-					})
-				}
-
-			case "content_block_delta":
-				if event.Index == nil || event.Delta == nil {
-					return nil
-				}
-				idx := *event.Index
-				delta := event.Delta
-				sb := activeBlocks[idx]
-
-				switch delta.Type {
-				case "text_delta":
-					send(&sdk.TextDeltaPart{ID: messageID, Text: delta.Text})
-				case "thinking_delta":
-					send(&sdk.ReasoningDeltaPart{ID: messageID, Text: delta.Thinking})
-				case "input_json_delta":
-					if sb != nil {
-						sb.args += delta.PartialJSON
-						send(&sdk.ToolInputDeltaPart{
-							ID:    sb.toolID,
-							Delta: delta.PartialJSON,
-						})
-					}
-				case "signature_delta":
-					if sb != nil {
-						sb.signature += delta.Signature
-					}
-				}
-
-			case "content_block_stop":
-				if event.Index == nil {
-					return nil
-				}
-				idx := *event.Index
-				sb, ok := activeBlocks[idx]
-				if !ok {
-					return nil
-				}
-				delete(activeBlocks, idx)
-
-				switch sb.blockType {
-				case blockTypeText:
-					send(&sdk.TextEndPart{ID: messageID})
-				case blockTypeThinking:
-					var meta map[string]any
-					if sb.signature != "" {
-						meta = map[string]any{
-							"anthropic": map[string]any{"signature": sb.signature},
-						}
-					}
-					send(&sdk.ReasoningEndPart{ID: messageID, ProviderMetadata: meta})
-				case blockTypeToolUse:
-					send(&sdk.ToolInputEndPart{ID: sb.toolID})
-					var input any
-					if sb.args != "" {
-						if err := json.Unmarshal([]byte(sb.args), &input); err != nil {
-							send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: unmarshal tool args for %q: %w", sb.toolName, err)})
-						}
-					}
-					send(&sdk.StreamToolCallPart{
-						ToolCallID: sb.toolID,
-						ToolName:   sb.toolName,
-						Input:      input,
-					})
-				}
-
-			case "message_delta":
-				if event.Delta != nil {
-					rawFinishReason = event.Delta.StopReason
-					finishReason = mapFinishReason(rawFinishReason)
-				}
-				if event.Usage != nil {
-					usage.OutputTokens = event.Usage.OutputTokens
-					usage.TotalTokens = usage.InputTokens + usage.OutputTokens
-				}
-				send(&sdk.FinishStepPart{
-					FinishReason:    finishReason,
-					RawFinishReason: rawFinishReason,
-					Usage:           usage,
-					Response: sdk.ResponseMetadata{
-						ID:      messageID,
-						ModelID: messageModel,
-					},
-				})
-
-			case "message_stop":
-				return utils.ErrStreamDone
-
-			case "ping":
-				// ignore
-
-			case "error":
-				errMsg := "unknown error"
-				if event.Delta != nil && event.Delta.Text != "" {
-					errMsg = event.Delta.Text
-				}
-				send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream error: %s", errMsg)})
-			}
-
-			return nil
-		})
+		}, h.handleEvent)
 
 		if err != nil {
-			send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream failed: %w", err)})
+			h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream failed: %w", err)})
 		}
 
-		send(&sdk.FinishPart{
-			FinishReason:    finishReason,
-			RawFinishReason: rawFinishReason,
-			TotalUsage:      usage,
+		h.send(&sdk.FinishPart{
+			FinishReason:    h.finishReason,
+			RawFinishReason: h.rawFinishReason,
+			TotalUsage:      h.usage,
 		})
 	}()
 
 	return &sdk.StreamResult{Stream: ch}, nil
+}
+
+type streamHandler struct {
+	ch           chan sdk.StreamPart
+	ctx          context.Context
+	activeBlocks map[int]*streamingBlock
+
+	rawFinishReason string
+	finishReason    sdk.FinishReason
+	usage           sdk.Usage
+	messageID       string
+	messageModel    string
+}
+
+func (h *streamHandler) send(part sdk.StreamPart) bool {
+	select {
+	case h.ch <- part:
+		return true
+	case <-h.ctx.Done():
+		return false
+	}
+}
+
+func (h *streamHandler) handleEvent(ev *utils.SSEEvent) error {
+	var event streamEvent
+	if err := json.Unmarshal([]byte(ev.Data), &event); err != nil {
+		h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: unmarshal event: %w", err)})
+		return err
+	}
+
+	switch event.Type {
+	case "message_start":
+		h.onMessageStart(&event)
+	case "content_block_start":
+		h.onBlockStart(&event)
+	case "content_block_delta":
+		h.onBlockDelta(&event)
+	case "content_block_stop":
+		h.onBlockStop(&event)
+	case "message_delta":
+		h.onMessageDelta(&event)
+	case "message_stop":
+		return utils.ErrStreamDone
+	case "ping":
+		// ignore
+	case "error":
+		h.onError(&event)
+	}
+	return nil
+}
+
+func (h *streamHandler) onMessageStart(event *streamEvent) {
+	if event.Message == nil {
+		return
+	}
+	h.messageID = event.Message.ID
+	h.messageModel = event.Message.Model
+	h.usage = convertUsage(&event.Message.Usage)
+}
+
+func (h *streamHandler) onBlockStart(event *streamEvent) {
+	if event.Index == nil || event.ContentBlock == nil {
+		return
+	}
+	idx := *event.Index
+	cb := event.ContentBlock
+	switch cb.Type {
+	case blockTypeText:
+		h.activeBlocks[idx] = &streamingBlock{blockType: blockTypeText}
+		h.send(&sdk.TextStartPart{ID: h.messageID})
+	case blockTypeThinking:
+		h.activeBlocks[idx] = &streamingBlock{blockType: blockTypeThinking}
+		h.send(&sdk.ReasoningStartPart{ID: h.messageID})
+	case blockTypeToolUse:
+		h.activeBlocks[idx] = &streamingBlock{
+			blockType: blockTypeToolUse,
+			toolID:    cb.ID,
+			toolName:  cb.Name,
+		}
+		h.send(&sdk.ToolInputStartPart{
+			ID:       cb.ID,
+			ToolName: cb.Name,
+		})
+	}
+}
+
+func (h *streamHandler) onBlockDelta(event *streamEvent) {
+	if event.Index == nil || event.Delta == nil {
+		return
+	}
+	idx := *event.Index
+	delta := event.Delta
+	sb := h.activeBlocks[idx]
+
+	switch delta.Type {
+	case "text_delta":
+		h.send(&sdk.TextDeltaPart{ID: h.messageID, Text: delta.Text})
+	case "thinking_delta":
+		h.send(&sdk.ReasoningDeltaPart{ID: h.messageID, Text: delta.Thinking})
+	case "input_json_delta":
+		if sb != nil {
+			sb.args += delta.PartialJSON
+			h.send(&sdk.ToolInputDeltaPart{
+				ID:    sb.toolID,
+				Delta: delta.PartialJSON,
+			})
+		}
+	case "signature_delta":
+		if sb != nil {
+			sb.signature += delta.Signature
+		}
+	}
+}
+
+func (h *streamHandler) onBlockStop(event *streamEvent) {
+	if event.Index == nil {
+		return
+	}
+	idx := *event.Index
+	sb, ok := h.activeBlocks[idx]
+	if !ok {
+		return
+	}
+	delete(h.activeBlocks, idx)
+
+	switch sb.blockType {
+	case blockTypeText:
+		h.send(&sdk.TextEndPart{ID: h.messageID})
+	case blockTypeThinking:
+		var meta map[string]any
+		if sb.signature != "" {
+			meta = map[string]any{
+				"anthropic": map[string]any{"signature": sb.signature},
+			}
+		}
+		h.send(&sdk.ReasoningEndPart{ID: h.messageID, ProviderMetadata: meta})
+	case blockTypeToolUse:
+		h.send(&sdk.ToolInputEndPart{ID: sb.toolID})
+		var input any
+		if sb.args != "" {
+			if err := json.Unmarshal([]byte(sb.args), &input); err != nil {
+				h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: unmarshal tool args for %q: %w", sb.toolName, err)})
+			}
+		}
+		h.send(&sdk.StreamToolCallPart{
+			ToolCallID: sb.toolID,
+			ToolName:   sb.toolName,
+			Input:      input,
+		})
+	}
+}
+
+func (h *streamHandler) onMessageDelta(event *streamEvent) {
+	if event.Delta != nil {
+		h.rawFinishReason = event.Delta.StopReason
+		h.finishReason = mapFinishReason(h.rawFinishReason)
+	}
+	if event.Usage != nil {
+		h.usage.OutputTokens = event.Usage.OutputTokens
+		h.usage.TotalTokens = h.usage.InputTokens + h.usage.OutputTokens
+	}
+	h.send(&sdk.FinishStepPart{
+		FinishReason:    h.finishReason,
+		RawFinishReason: h.rawFinishReason,
+		Usage:           h.usage,
+		Response: sdk.ResponseMetadata{
+			ID:      h.messageID,
+			ModelID: h.messageModel,
+		},
+	})
+}
+
+func (h *streamHandler) onError(event *streamEvent) {
+	errMsg := "unknown error"
+	if event.Delta != nil && event.Delta.Text != "" {
+		errMsg = event.Delta.Text
+	}
+	h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream error: %s", errMsg)})
 }
 
 type streamingBlock struct {
