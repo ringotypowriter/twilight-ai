@@ -611,6 +611,75 @@ func TestDoStream_Thinking(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_ReasoningFromOtherProvider(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		if len(body.Messages) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(body.Messages))
+		}
+
+		var assistantMsg struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		}
+		json.Unmarshal(body.Messages[0], &assistantMsg)
+		if assistantMsg.Role != "assistant" {
+			t.Errorf("msg[0] role: got %q", assistantMsg.Role)
+		}
+		for _, block := range assistantMsg.Content {
+			if block["type"] == "thinking" {
+				t.Error("reasoning from other provider should not become a thinking block")
+			}
+		}
+		if len(assistantMsg.Content) != 2 {
+			t.Fatalf("expected 2 text blocks (reasoning fallback + text), got %+v", assistantMsg.Content)
+		}
+		if assistantMsg.Content[0]["type"] != "text" || assistantMsg.Content[0]["text"] != "thinking from gemini" {
+			t.Errorf("expected reasoning fallback as text, got %+v", assistantMsg.Content[0])
+		}
+		if assistantMsg.Content[1]["type"] != "text" || assistantMsg.Content[1]["text"] != "The answer" {
+			t.Errorf("expected original text block, got %+v", assistantMsg.Content[1])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cross", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{
+					sdk.ReasoningPart{
+						Text:             "thinking from gemini",
+						ProviderMetadata: map[string]any{"google": map[string]any{"thoughtSignature": "abc123"}},
+					},
+					sdk.TextPart{Text: "The answer"},
+				},
+			},
+			sdk.UserMessage("follow up"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if result.Text != "OK" {
+		t.Errorf("text: got %q", result.Text)
+	}
+}
+
 func TestDoGenerate_CacheUsage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

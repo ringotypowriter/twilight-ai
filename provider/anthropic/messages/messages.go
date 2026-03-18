@@ -354,11 +354,17 @@ func convertAssistantMessage(msg sdk.Message) anthropicMessage {
 			blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Text})
 		case sdk.ReasoningPart:
 			sig := extractAnthropicSignature(p.ProviderMetadata)
-			blocks = append(blocks, contentBlock{
-				Type:      blockTypeThinking,
-				Thinking:  p.Text,
-				Signature: sig,
-			})
+			if sig == "" {
+				if p.Text != "" {
+					blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Text})
+				}
+			} else {
+				blocks = append(blocks, contentBlock{
+					Type:      blockTypeThinking,
+					Thinking:  p.Text,
+					Signature: sig,
+				})
+			}
 		case sdk.ToolCallPart:
 			id := p.ToolCallID
 			if id == "" {
