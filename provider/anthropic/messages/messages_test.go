@@ -319,6 +319,130 @@ func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_AdjacentAssistantMessagesAreCanonicalized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if len(body.Messages) != 2 {
+			t.Fatalf("expected 2 messages after canonicalization, got %d", len(body.Messages))
+		}
+
+		var assistantMsg struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text,omitempty"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(body.Messages[1], &assistantMsg); err != nil {
+			t.Fatalf("decode assistant message: %v", err)
+		}
+
+		if assistantMsg.Role != "assistant" {
+			t.Fatalf("assistant role: got %q", assistantMsg.Role)
+		}
+		if len(assistantMsg.Content) != 2 {
+			t.Fatalf("assistant content length: got %d, want 2", len(assistantMsg.Content))
+		}
+		if assistantMsg.Content[0].Type != "text" || assistantMsg.Content[0].Text != "first" {
+			t.Fatalf("assistant content[0]: got %+v", assistantMsg.Content[0])
+		}
+		if assistantMsg.Content[1].Type != "text" || assistantMsg.Content[1].Text != "second" {
+			t.Fatalf("assistant content[1]: got %+v", assistantMsg.Content[1])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_adj", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			sdk.UserMessage("hello"),
+			sdk.AssistantMessage("first"),
+			sdk.AssistantMessage("second"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if result.Text != "OK" {
+		t.Errorf("text: got %q", result.Text)
+	}
+}
+
+func TestDoGenerate_FinalAssistantPrefillTrimsTrailingWhitespace(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if len(body.Messages) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(body.Messages))
+		}
+
+		var assistantMsg struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text,omitempty"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(body.Messages[1], &assistantMsg); err != nil {
+			t.Fatalf("decode assistant message: %v", err)
+		}
+
+		if assistantMsg.Role != "assistant" {
+			t.Fatalf("assistant role: got %q", assistantMsg.Role)
+		}
+		if len(assistantMsg.Content) != 1 {
+			t.Fatalf("assistant content length: got %d, want 1", len(assistantMsg.Content))
+		}
+		if assistantMsg.Content[0].Text != "prefill" {
+			t.Fatalf("assistant text: got %q, want %q", assistantMsg.Content[0].Text, "prefill")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_prefill", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			sdk.UserMessage("hello"),
+			sdk.AssistantMessage("prefill \n\t"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if result.Text != "OK" {
+		t.Errorf("text: got %q", result.Text)
+	}
+}
+
 func TestDoGenerate_Thinking(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"unicode"
 
 	"github.com/memohai/twilight-ai/internal/utils"
 	"github.com/memohai/twilight-ai/sdk"
@@ -299,7 +301,7 @@ func convertMessages(params *sdk.GenerateParams) ([]contentBlock, []anthropicMes
 			out = appendUserBlocks(out, blocks)
 
 		case sdk.MessageRoleAssistant:
-			out = append(out, convertAssistantMessage(msg))
+			out = appendAssistantBlocks(out, convertAssistantMessage(msg).Content)
 
 		case sdk.MessageRoleTool:
 			blocks := convertToolResults(msg.Content)
@@ -307,6 +309,7 @@ func convertMessages(params *sdk.GenerateParams) ([]contentBlock, []anthropicMes
 		}
 	}
 
+	trimFinalAssistantPrefill(out)
 	return system, out
 }
 
@@ -321,6 +324,35 @@ func appendUserBlocks(messages []anthropicMessage, blocks []contentBlock) []anth
 		Role:    "user",
 		Content: blocks,
 	})
+}
+
+func appendAssistantBlocks(messages []anthropicMessage, blocks []contentBlock) []anthropicMessage {
+	if len(messages) > 0 && messages[len(messages)-1].Role == "assistant" {
+		messages[len(messages)-1].Content = append(messages[len(messages)-1].Content, blocks...)
+		return messages
+	}
+	return append(messages, anthropicMessage{
+		Role:    "assistant",
+		Content: blocks,
+	})
+}
+
+func trimFinalAssistantPrefill(messages []anthropicMessage) {
+	if len(messages) == 0 {
+		return
+	}
+
+	last := &messages[len(messages)-1]
+	if last.Role != "assistant" || len(last.Content) == 0 {
+		return
+	}
+
+	lastBlock := &last.Content[len(last.Content)-1]
+	if lastBlock.Type != blockTypeText {
+		return
+	}
+
+	lastBlock.Text = strings.TrimRightFunc(lastBlock.Text, unicode.IsSpace)
 }
 
 func convertUserContent(parts []sdk.MessagePart) []contentBlock {
